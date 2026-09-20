@@ -1,0 +1,147 @@
+openapi: 3.0.3
+info:
+  title: Invoicer API
+  description: >
+    Local automation that generates the monthly Glassdoor invoice PDF and
+    sends it by email — an HTTP wrapper around the same steps as the
+    `/invoice` slash command (see .claude/commands/invoice.md). No auth
+    layer: this is a single-user tool meant to run on localhost only.
+  version: 1.0.0
+servers:
+  - url: http://localhost:4100
+paths:
+  /ping:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Server is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+  /invoices:
+    get:
+      summary: List generated invoice PDFs
+      description: Read-only — no side effects.
+      responses:
+        "200":
+          description: Invoices found in invoices/
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  invoices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: Invoice 8_2026.pdf
+                        sizeBytes:
+                          type: integer
+                        createdAt:
+                          type: string
+                          format: date-time
+  /invoices/generate:
+    post:
+      summary: Generate this month's invoice PDF
+      description: >
+        Patches the date into invoice-template.numbers, opens it in Numbers,
+        exports a PDF into invoices/, and closes it without saving. Local
+        side effect only (briefly opens the Numbers app) — safe to re-run,
+        overwrites this month's file.
+      responses:
+        "200":
+          description: Invoice generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScriptResult"
+        "500":
+          description: Script failed (see stderr)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScriptResult"
+  /time/log:
+    post:
+      summary: Log this month's billable hours in Svitla's time tracker
+      description: >
+        Submits real time entries to id.svitla.com for every remaining
+        weekday this month — an outward-facing, effectively irreversible
+        action once it runs. Requires SVITLA_PASS set in the server's own
+        environment (never accepted over HTTP) and an explicit confirm flag.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: Must be true, or the request is rejected with 400.
+      responses:
+        "200":
+          description: Time entries logged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScriptResult"
+        "400":
+          description: Missing confirm:true, or SVITLA_PASS unset
+        "500":
+          description: Script failed (see stderr)
+  /invoices/send:
+    post:
+      summary: Email the current month's invoice PDF to the client
+      description: >
+        Sends a real email (Outlook, via the Svitla Chrome profile) with
+        the invoice PDF attached — irreversible once sent. Requires an
+        explicit confirm flag; a plain POST with no body is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm:
+                  type: boolean
+                  description: Must be true, or the request is rejected with 400.
+      responses:
+        "200":
+          description: Email sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScriptResult"
+        "400":
+          description: Missing confirm:true
+        "500":
+          description: Script failed (see stderr) — e.g. this month's PDF doesn't exist yet
+components:
+  schemas:
+    ScriptResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        code:
+          type: integer
+        stdout:
+          type: string
+        stderr:
+          type: string
+        file:
+          type: string
+          nullable: true
+          description: Only present on /invoices/generate — the PDF path that was written.
