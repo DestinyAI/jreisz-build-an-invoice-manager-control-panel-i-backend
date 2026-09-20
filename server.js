@@ -195,6 +195,24 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  // Read-only preview of what /time/log would submit: which weekdays this
+  // month are still empty on Svitla's calendar and which Jira ticket each
+  // one would be filled with (same round-robin as the real run). Lets the
+  // app show "this will log N days" before the user commits to the
+  // irreversible POST below — no browser window, no submission.
+  if (req.method === 'GET' && url === '/time/preview') {
+    if (!process.env.SVITLA_PASS) {
+      return json(res, 500, { ok: false, error: 'SVITLA_PASS is not set in the server environment' });
+    }
+    const result = await run('node', [path.join(SCRIPTS, 'log-time.js'), '--dry-run']);
+    const match = result.stdout.match(/PREVIEW:(\{.*\})/);
+    if (!match) {
+      return json(res, 500, { ok: false, error: result.stderr || 'Preview script produced no PREVIEW: line' });
+    }
+    const { days } = JSON.parse(match[1]);
+    return json(res, 200, { ok: true, days });
+  }
+
   // Logs real billable hours into Svitla's time tracker for the current
   // month — an outward-facing, hard-to-undo action once submitted, so it
   // requires an explicit {"confirm": true} body rather than firing on any
@@ -213,7 +231,10 @@ const server = http.createServer(async (req, res) => {
       return json(res, 500, { ok: false, error: 'SVITLA_PASS is not set in the server environment' });
     }
     const result = await run('node', [path.join(SCRIPTS, 'log-time.js')]);
-    return json(res, result.ok ? 200 : 500, result);
+    if (!result.ok) return json(res, 500, result);
+    const match = result.stdout.match(/RESULT:(\{.*\})/);
+    const days = match ? JSON.parse(match[1]).days : [];
+    return json(res, 200, { ok: true, days });
   }
 
   // Sends the current month's invoice PDF to the client by email via

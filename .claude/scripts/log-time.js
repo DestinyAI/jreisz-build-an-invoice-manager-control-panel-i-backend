@@ -107,6 +107,14 @@ async function getDaysToLog(page) {
   });
 }
 
+// --dry-run: does everything read-only (fetch tickets, log in, scan the
+// calendar for empty days, compute the same round-robin day→ticket
+// assignment the real run would use) but skips the fill+submit loop. Lets
+// the app show "this will log N days with these descriptions" before the
+// user commits to an irreversible submission. Runs headless (no visible
+// browser, no slowMo) since there's no fill-in to visually verify here.
+const DRY_RUN = process.argv.includes('--dry-run');
+
 (async () => {
   if (!SVITLA_PASS) { console.error('Set SVITLA_PASS env var'); process.exit(1); }
 
@@ -118,7 +126,9 @@ async function getDaysToLog(page) {
   console.log(`${tickets.length} tickets loaded`);
   if (tickets.length === 0) { console.error('No tickets found — aborting'); process.exit(1); }
 
-  const browser = await chromium.launch({ headless: false, slowMo: 400 });
+  const browser = await chromium.launch(
+    DRY_RUN ? { headless: true } : { headless: false, slowMo: 400 }
+  );
   const page = await browser.newPage();
 
   console.log('Logging in to Svitla...');
@@ -130,11 +140,23 @@ async function getDaysToLog(page) {
 
   if (days.length === 0) {
     console.log('Nothing to log — all days already filled or no working days found.');
+    if (DRY_RUN) console.log(`PREVIEW:${JSON.stringify({ days: [] })}`);
+    await browser.close();
+    return;
+  }
+
+  if (DRY_RUN) {
+    const plan = days.map((day, i) => ({
+      date: day.date,
+      description: tickets[i % tickets.length],
+    }));
+    console.log(`PREVIEW:${JSON.stringify({ days: plan })}`);
     await browser.close();
     return;
   }
 
   let logged = 0;
+  const loggedDays = [];
   for (let i = 0; i < days.length; i++) {
     const day = days[i];
     const description = tickets[i % tickets.length];
@@ -172,10 +194,12 @@ async function getDaysToLog(page) {
     await page.waitForLoadState('networkidle');
 
     logged++;
+    loggedDays.push({ date: day.date, description });
     console.log(`  ✓ Logged`);
     await page.waitForTimeout(300);
   }
 
   console.log(`\n✓ Done — ${logged}/${days.length} days logged`);
+  console.log(`RESULT:${JSON.stringify({ days: loggedDays })}`);
   await browser.close();
 })();
