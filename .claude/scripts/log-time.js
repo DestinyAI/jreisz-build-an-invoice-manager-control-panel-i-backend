@@ -72,7 +72,16 @@ async function getDaysToLog(page) {
   await page.goto(CALENDAR_URL);
   await page.waitForLoadState('networkidle');
 
-  return await page.evaluate(() => {
+  // The site's own `.otherMonth` class is supposed to mark leading/trailing
+  // days from adjacent months that fill out the calendar grid, but it does
+  // NOT reliably cover the leading edge — confirmed on a real run where Aug
+  // 31 (the Monday starting September's first calendar row) had no
+  // `.otherMonth` class and got included as if it were a September day. Belt
+  // and suspenders: also filter by the actual calendar month/year ourselves.
+  const now = new Date();
+  const currentYearMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  return await page.evaluate((currentYearMonth) => {
     const cells = document.querySelectorAll('td.day:not(.otherMonth)');
     const days = [];
     for (const cell of cells) {
@@ -80,6 +89,9 @@ async function getDaysToLog(page) {
       if (!header) continue;
       const dateAttr = header.getAttribute('data-date');
       if (!dateAttr) continue;
+
+      // Belt and suspenders against the .otherMonth gap above.
+      if (!dateAttr.startsWith(currentYearMonth)) continue;
 
       // Skip weekends
       if (cell.classList.contains('weekend')) continue;
@@ -104,7 +116,7 @@ async function getDaysToLog(page) {
       days.push({ date: dateAttr, urlDate: `${d}-${m}-${y}` });
     }
     return days;
-  });
+  }, currentYearMonth);
 }
 
 // --dry-run: does everything read-only (fetch tickets, log in, scan the
