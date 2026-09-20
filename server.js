@@ -290,21 +290,21 @@ const server = http.createServer(async (req, res) => {
 
     // 1. Is Chrome running?
     const chrome = await run('pgrep', ['-x', 'Google Chrome']);
-    checks.push({ name: 'Chrome is running', pass: chrome.ok, hint: 'Open Google Chrome before sending' });
+    checks.push({ name: 'Chrome is running', passed: chrome.ok, hint: 'Open Google Chrome before sending' });
 
     // 2. Accessibility permission — osascript can drive System Events
     const ax = await run('osascript', ['-e', 'tell application "System Events" to return name of first process whose frontmost is true']);
-    checks.push({ name: 'Accessibility permission granted', pass: ax.ok, hint: 'System Settings → Privacy & Security → Accessibility → enable Terminal (or the app running this server)' });
+    checks.push({ name: 'Accessibility permission granted', passed: ax.ok, hint: 'System Settings → Privacy & Security → Accessibility → enable Terminal (or the app running this server)' });
 
     // 3. Chrome JS from Apple Events enabled
     const jsAe = await run('defaults', ['read', 'com.google.Chrome', 'AllowJavascriptFromAppleEvents']);
-    checks.push({ name: '"Allow JavaScript from Apple Events" enabled in Chrome', pass: jsAe.stdout === '1', hint: 'Chrome menu → View → Developer → Allow JavaScript from Apple Events' });
+    checks.push({ name: '"Allow JavaScript from Apple Events" enabled in Chrome', passed: jsAe.stdout === '1', hint: 'Chrome menu → View → Developer → Allow JavaScript from Apple Events' });
 
     // 4. Is the invoices/ folder writable (sanity check)?
     const writable = fs.existsSync(INVOICES_DIR);
-    checks.push({ name: 'invoices/ folder exists', pass: writable, hint: `Create the folder at ${INVOICES_DIR}` });
+    checks.push({ name: 'invoices/ folder exists', passed: writable, hint: `Create the folder at ${INVOICES_DIR}` });
 
-    const allPass = checks.every((c) => c.pass);
+    const allPass = checks.every((c) => c.passed);
     return json(res, 200, { ok: allPass, checks });
   }
 
@@ -344,6 +344,9 @@ const server = http.createServer(async (req, res) => {
 
   // App-facing send endpoint — accepts {filename, recipientEmail, subject, message}
   // and runs the same send script, overriding the PDF path via INVOICE_FILE.
+  // recipientEmail/subject/message are URL-encoded here (Node's encodeURIComponent)
+  // and handed to the script as already-encoded env vars — the script just
+  // concatenates them into the Outlook deeplink, no shell-side encoding needed.
   if (req.method === 'POST' && url === '/api/invoices/send') {
     let body = {};
     try { body = JSON.parse(await readBody(req) || '{}'); } catch {
@@ -352,7 +355,11 @@ const server = http.createServer(async (req, res) => {
     if (!body.filename) return json(res, 400, { ok: false, error: 'filename is required' });
     const filePath = path.join(INVOICES_DIR, path.basename(body.filename));
     if (!fs.existsSync(filePath)) return json(res, 404, { ok: false, error: `Invoice not found: ${body.filename}` });
-    const result = await run('bash', [path.join(SCRIPTS, 'send-invoice-email.sh'), filePath]);
+    const env = { ...process.env };
+    if (body.recipientEmail) env.RECIPIENT_EMAIL_ENC = encodeURIComponent(body.recipientEmail);
+    if (body.subject) env.EMAIL_SUBJECT_ENC = encodeURIComponent(body.subject);
+    if (body.message) env.EMAIL_MESSAGE_ENC = encodeURIComponent(body.message);
+    const result = await run('bash', [path.join(SCRIPTS, 'send-invoice-email.sh'), filePath], { env });
     return json(res, result.ok ? 200 : 500, result);
   }
 
