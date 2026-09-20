@@ -91,7 +91,8 @@ if items or client_info:
         qty = int(item.get('qty', 1))
         lines.append(f'set value of cell 2 of row {row} to "{desc}"')
         lines.append(f'set value of cell {QTY_COL} of row {row} to {qty}')
-        lines.append(f'set value of cell {AMT_COL} of row {row} to {amt}')
+        # Column 7 is "Total price", so the unit amount has to be multiplied out.
+        lines.append(f'set value of cell {AMT_COL} of row {row} to {amt * qty}')
     if client_info:
         def wrap(text, width):
             """Break an address to the cell's width. These merged cells clip
