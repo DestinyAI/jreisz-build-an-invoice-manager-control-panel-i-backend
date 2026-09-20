@@ -121,7 +121,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const url = req.url ?? '/';
+  // Split off the query string so every existing exact-match route below
+  // (url === '/foo') keeps working unchanged, while routes that need query
+  // params (currently just GET /time/preview's ?overtime=) can read them
+  // from searchParams instead of re-parsing req.url themselves.
+  const [urlPath, queryString] = (req.url ?? '/').split('?');
+  const url = urlPath;
+  const searchParams = new URLSearchParams(queryString || '');
 
   if (req.method === 'GET' && url === '/ping') {
     return json(res, 200, { ok: true });
@@ -204,7 +210,21 @@ const server = http.createServer(async (req, res) => {
     if (!process.env.SVITLA_PASS) {
       return json(res, 500, { ok: false, error: 'SVITLA_PASS is not set in the server environment' });
     }
-    const result = await run('node', [path.join(SCRIPTS, 'log-time.js'), '--dry-run']);
+    // Optional ?overtime=<json> — same shape as POST /time/log's
+    // overtimeByDate body field, e.g. {"2026-09-03":{"hours":3,"description":"..."}}
+    // — so the preview reflects manual overtime overrides before submission.
+    let overtimeByDate = {};
+    const overtimeParam = searchParams.get('overtime');
+    if (overtimeParam) {
+      try {
+        overtimeByDate = JSON.parse(overtimeParam);
+      } catch {
+        return json(res, 400, { ok: false, error: 'invalid JSON in ?overtime=' });
+      }
+    }
+    const result = await run('node', [path.join(SCRIPTS, 'log-time.js'), '--dry-run'], {
+      env: { ...process.env, OVERTIME_JSON: JSON.stringify(overtimeByDate) },
+    });
     const match = result.stdout.match(/PREVIEW:(\{.*\})/);
     if (!match) {
       return json(res, 500, { ok: false, error: result.stderr || 'Preview script produced no PREVIEW: line' });
@@ -221,8 +241,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url === '/time/log') {
     const body = await readBody(req);
     let confirm = false;
+    let overtimeByDate = {};
     try {
-      confirm = JSON.parse(body || '{}').confirm === true;
+      const parsed = JSON.parse(body || '{}');
+      confirm = parsed.confirm === true;
+      // Manual overtime overrides, keyed by "YYYY-MM-DD", e.g.
+      // {"2026-09-03":{"hours":3,"description":"ir-critical-secvulgd-33074"}}
+      // — that day gets 8 (base) + 3 = 11h, description becomes
+      // "<round-robin Jira ticket> Overtime Hours ir-critical-secvulgd-33074".
+      overtimeByDate = parsed.overtimeByDate || {};
     } catch {
       return json(res, 400, { ok: false, error: 'invalid JSON body' });
     }
@@ -230,7 +257,9 @@ const server = http.createServer(async (req, res) => {
     if (!process.env.SVITLA_PASS) {
       return json(res, 500, { ok: false, error: 'SVITLA_PASS is not set in the server environment' });
     }
-    const result = await run('node', [path.join(SCRIPTS, 'log-time.js')]);
+    const result = await run('node', [path.join(SCRIPTS, 'log-time.js')], {
+      env: { ...process.env, OVERTIME_JSON: JSON.stringify(overtimeByDate) },
+    });
     if (!result.ok) return json(res, 500, result);
     const match = result.stdout.match(/RESULT:(\{.*\})/);
     const days = match ? JSON.parse(match[1]).days : [];

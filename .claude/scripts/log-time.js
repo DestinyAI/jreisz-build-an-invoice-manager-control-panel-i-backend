@@ -127,6 +127,33 @@ async function getDaysToLog(page) {
 // browser, no slowMo) since there's no fill-in to visually verify here.
 const DRY_RUN = process.argv.includes('--dry-run');
 
+// Manual overtime overrides, keyed by "YYYY-MM-DD" — e.g.
+// { "2026-09-03": { hours: 3, description: "ir-critical-secvulgd-33074" } }
+// means that day gets 8 (base) + 3 = 11h logged, with the description built
+// as "<round-robin Jira ticket> Overtime Hours <custom description>" instead
+// of just the ticket. Passed in by server.js from the app's request body
+// (POST /time/log) or query string (GET /time/preview) — never typed
+// directly into this script.
+let OVERTIME_BY_DATE = {};
+try {
+  OVERTIME_BY_DATE = JSON.parse(process.env.OVERTIME_JSON || '{}');
+} catch {
+  console.error('OVERTIME_JSON was set but not valid JSON — ignoring overtime overrides');
+}
+
+// Combines a day's round-robin Jira ticket with any overtime override for
+// that date. Shared by the dry-run preview and the real submission loop so
+// what you're shown is exactly what gets logged.
+function resolveDayEntry(date, baseDescription) {
+  const ot = OVERTIME_BY_DATE[date];
+  if (!ot) return { hours: 8, description: baseDescription };
+  const extraHours = Number(ot.hours) || 0;
+  const description = ot.description
+    ? `${baseDescription} Overtime Hours ${ot.description}`
+    : baseDescription;
+  return { hours: 8 + extraHours, description };
+}
+
 (async () => {
   if (!SVITLA_PASS) { console.error('Set SVITLA_PASS env var'); process.exit(1); }
 
@@ -158,10 +185,10 @@ const DRY_RUN = process.argv.includes('--dry-run');
   }
 
   if (DRY_RUN) {
-    const plan = days.map((day, i) => ({
-      date: day.date,
-      description: tickets[i % tickets.length],
-    }));
+    const plan = days.map((day, i) => {
+      const { hours, description } = resolveDayEntry(day.date, tickets[i % tickets.length]);
+      return { date: day.date, description, hours };
+    });
     console.log(`PREVIEW:${JSON.stringify({ days: plan })}`);
     await browser.close();
     return;
@@ -171,8 +198,8 @@ const DRY_RUN = process.argv.includes('--dry-run');
   const loggedDays = [];
   for (let i = 0; i < days.length; i++) {
     const day = days[i];
-    const description = tickets[i % tickets.length];
-    console.log(`\n[${i + 1}/${days.length}] ${day.date} → ${description.substring(0, 70)}...`);
+    const { hours, description } = resolveDayEntry(day.date, tickets[i % tickets.length]);
+    console.log(`\n[${i + 1}/${days.length}] ${day.date} → ${hours}h — ${description.substring(0, 70)}...`);
 
     await page.goto(`https://id.svitla.com/time_entries/new?date=${day.urlDate}`);
     await page.waitForLoadState('networkidle');
@@ -199,14 +226,14 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
     // Fill description and time
     await page.fill('#time_entry_description', description);
-    await page.fill('#time_entry_human_time', '8h');
+    await page.fill('#time_entry_human_time', `${hours}h`);
 
     // Submit
     await page.click('input[type="submit"][value="Enter time"]');
     await page.waitForLoadState('networkidle');
 
     logged++;
-    loggedDays.push({ date: day.date, description });
+    loggedDays.push({ date: day.date, description, hours });
     console.log(`  ✓ Logged`);
     await page.waitForTimeout(300);
   }
