@@ -13,7 +13,8 @@ if [[ -n "${1:-}" ]]; then
 elif [[ -n "${INVOICE_FILE:-}" ]]; then
   INVOICE_PATH="$INVOICE_FILE"
 else
-  INVOICE_PATH="/Users/svitla/invoicer-backend/invoices/Invoice ${MONTH}_${YEAR}.pdf"
+  BACKEND_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+  INVOICE_PATH="$BACKEND_ROOT/invoices/Invoice ${MONTH}_${YEAR}.pdf"
 fi
 
 if [[ ! -f "$INVOICE_PATH" ]]; then

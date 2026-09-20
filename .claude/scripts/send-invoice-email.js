@@ -1,5 +1,6 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
+const path = require('path');
 
 const SVITLA_PASS = process.env.SVITLA_PASS;
 const SVITLA_EMAIL = 'j.reisz@svitla.com';
@@ -8,7 +9,8 @@ function getInvoicePath() {
   const now = new Date();
   const month = now.getMonth() + 1;
   const year = now.getFullYear();
-  return `/Users/svitla/invoicer-backend/invoices/Invoice ${month}_${year}.pdf`;
+  const backendRoot = path.resolve(__dirname, '../..');
+  return path.join(backendRoot, 'invoices', `Invoice ${month}_${year}.pdf`);
 }
 
 (async () => {

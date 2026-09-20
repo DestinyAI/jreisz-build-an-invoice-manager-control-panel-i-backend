@@ -4,11 +4,13 @@
 
 set -euo pipefail
 
-TEMPLATE_PATH="$HOME/invoicer-backend/invoice-template.numbers"
-OUTPUT_DIR="$HOME/invoicer-backend/invoices"
+# Resolve relative to this script — works wherever the repo is cloned.
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+BACKEND_ROOT="$(cd "$SCRIPTS/../.." && pwd)"
+TEMPLATE_PATH="$BACKEND_ROOT/invoice-template.numbers"
+OUTPUT_DIR="$BACKEND_ROOT/invoices"
 WORK_DIR="/tmp/invoice-work-$$"
 PATCHED="/tmp/invoice-patched-$$.numbers"
-SCRIPTS="$HOME/invoicer-backend/.claude/scripts"
 
 MONTH=$(date +%-m)
 MONTH_PAD=$(date +%m)
