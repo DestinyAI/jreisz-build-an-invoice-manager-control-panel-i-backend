@@ -1,17 +1,11 @@
 {
-  "name": "invoicer",
+  "name": "build-an-invoice-manager-control-panel-i-backend",
   "version": "1.0.0",
+  "description": "Custom backend for invoicer-1",
   "main": "server.js",
   "scripts": {
-    "dev": "node server.js",
     "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "playwright": "^1.62.0-alpha-1781285727000"
-  }
+  "license": "ISC"
 }
