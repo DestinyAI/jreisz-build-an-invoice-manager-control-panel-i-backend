@@ -45,31 +45,9 @@ async function sbFetch(method, path, body) {
   return r.status === 204 ? { ok: true } : r.json();
 }
 
-// Resolves the current user from the X-Api-Key request header.
-// Falls back to INVOICER_USER env var for local curl testing.
-const FALLBACK_USER = process.env.INVOICER_USER || 'jreisz';
-const userCache = new Map(); // api_key → {id, display_name}, TTL ~5 min
-
-async function resolveUser(req) {
-  const apiKey = req.headers['x-api-key'] || '';
-  if (!apiKey) return { id: FALLBACK_USER, display_name: FALLBACK_USER };
-
-  if (userCache.has(apiKey)) {
-    const cached = userCache.get(apiKey);
-    if (Date.now() < cached.expiresAt) return cached.user;
-    userCache.delete(apiKey);
-  }
-
-  const r = await fetch(
-    `${SUPABASE_URL}/rest/v1/invoicer_users?api_key=eq.${encodeURIComponent(apiKey)}&limit=1`,
-    { headers: { 'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`, 'apikey': SUPABASE_SERVICE_KEY } }
-  );
-  const rows = await r.json();
-  if (!Array.isArray(rows) || rows.length === 0) return null; // unauthorized
-  const user = { id: rows[0].id, display_name: rows[0].display_name };
-  userCache.set(apiKey, { user, expiresAt: Date.now() + 5 * 60 * 1000 });
-  return user;
-}
+// Current user is set by INVOICER_USER in .env — no auth needed.
+// To run a second user: PORT=4101 INVOICER_USER=svitla node server.js
+const CURRENT_USER = process.env.INVOICER_USER || 'jreisz';
 
 
 async function ghApi(method, path, body) {
@@ -114,7 +92,7 @@ function run(cmd, args, opts = {}) {
 const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Api-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
     res.end();
@@ -133,10 +111,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
-  // Resolve caller identity — all routes below this point are user-scoped.
-  const currentUser = await resolveUser(req);
-  if (!currentUser) return json(res, 401, { ok: false, error: 'Invalid or missing X-Api-Key header' });
-  const CURRENT_USER = currentUser.id;
+  // User identity comes from INVOICER_USER env var (set per process).
 
   // Read-only: what's already been generated, no side effects.
   if (req.method === 'GET' && url === '/invoices') {
